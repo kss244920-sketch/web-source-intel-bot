@@ -8,9 +8,30 @@ from core.packager import ZipPackager
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 
-URL_REGEX = re.compile(
-    r"""(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))"""
-)
+
+def extract_target_url(text: str) -> Optional[str]:
+    """Smart auto-detector for URLs, domains, and paths without requiring commands."""
+    text = text.strip()
+    if text.startswith("/ws"):
+        parts = text.split(maxsplit=1)
+        if len(parts) > 1:
+            text = parts[1].strip()
+
+    # 1. Match full http/https URLs first
+    match = re.search(r'https?://[^\s<>"\']+', text, re.IGNORECASE)
+    if match:
+        return match.group(0).rstrip(".,;!?'\")")
+
+    # 2. Match standard domains (e.g. goagamea.com, www.site.co.in/path)
+    domain_match = re.search(
+        r'\b(?:www\.)?[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}(?::[0-9]{1,5})?(?:/[^\s<>"\']*)?',
+        text,
+        re.IGNORECASE
+    )
+    if domain_match:
+        return "https://" + domain_match.group(0).rstrip(".,;!?'\")")
+
+    return None
 
 
 class TelegramBotClient:
@@ -76,7 +97,6 @@ class TelegramBotClient:
             "document": (filename, file_bytes, "application/zip")
         }
 
-        # Telegram upload can take up to 20-30s depending on file size
         async with httpx.AsyncClient() as client:
             try:
                 r = await client.post(url, data=data, files=files, timeout=40.0)
@@ -87,7 +107,7 @@ class TelegramBotClient:
 
 
 async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
-    """Processes incoming Telegram updates."""
+    """Processes incoming Telegram updates with Smart Auto-Detection."""
     message = update.get("message") or update.get("edited_message")
     if not message:
         return
@@ -104,59 +124,45 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     # 1. Handle /start and /help commands
     if text.startswith(("/start", "/help")):
         welcome_text = (
-            "🚀 <b>Welcome to Advance WebSource &amp; Intel Bot!</b>\n\n"
-            "Main kisi bhi website ka <b>Full Source Code + A to Z Embedded APIs</b> extract karke single ZIP file me provide karta hoon.\n\n"
-            "✨ <b>Features:</b>\n"
-            "• 🌐 Full Source (HTML, CSS, JS, Images, Fonts)\n"
-            "• 🔌 <b>A-to-Z API Extraction</b> (Relative routes, Backend APIs, WebSockets)\n"
-            "• 🔑 <b>Secrets &amp; Config Scanner</b> (Firebase, Razorpay, Tokens)\n"
-            "• 📦 <b>Offline-Ready ZIP</b> (Links locally rewritten)\n\n"
-            "📌 <b>How to use:</b>\n"
-            "Send command: <code>/ws https://example.com</code>\n"
-            "or simply send any website link directly!"
+            "🚀 <b>Smart WebSource &amp; Intel Extractor Bot</b>\n\n"
+            "Ab kisi bhi command ki zaroorat nahi hai! Bas kisi bhi website ka link ya domain seedha yahan bhej dijiye.\n\n"
+            "✨ <b>What this Bot does:</b>\n"
+            "• 🌐 <b>Complete Source:</b> HTML, CSS, JS, Images, Fonts &amp; Configs\n"
+            "• 🔌 <b>A-to-Z API Extractor:</b> Live Backend routes, REST APIs &amp; WebSockets\n"
+            "• 🔑 <b>Secrets Detector:</b> Firebase configs, Payment keys &amp; Auth tokens\n"
+            "• 📦 <b>Offline Ready:</b> Unzip karke bina internet ke direct chalao\n\n"
+            "👉 <b>Try it now:</b> Send any link directly:\n"
+            "<code>goagamea.com</code> ya <code>https://example.com</code>"
         )
         await bot.send_message(chat_id, welcome_text, reply_to_message_id=msg_id)
         return
 
-    # 2. Extract URL from text or /ws command
-    target_url = None
-    if text.startswith("/ws"):
-        parts = text.split(maxsplit=1)
-        if len(parts) > 1:
-            target_url = parts[1].strip()
-        else:
-            await bot.send_message(
-                chat_id,
-                "⚠️ <b>Please provide a website URL!</b>\n\nExample:\n<code>/ws https://goagamea.com</code>",
-                reply_to_message_id=msg_id
-            )
-            return
-    else:
-        # Check if message contains a valid URL
-        match = URL_REGEX.search(text)
-        if match:
-            target_url = match.group(0).strip()
+    # 2. Smart Auto-Detect Target URL from message
+    target_url = extract_target_url(text)
 
     if not target_url:
+        # User sent non-URL random text
+        await bot.send_message(
+            chat_id,
+            "💡 <b>Please send a valid website link or domain!</b>\n\n"
+            "Example:\n<code>goagamea.com</code>\nya\n<code>https://example.com</code>",
+            reply_to_message_id=msg_id
+        )
         return
 
-    # Normalize URL scheme
-    if not target_url.startswith(("http://", "https://")):
-        target_url = "https://" + target_url
-
-    # 3. Send initial progress message
+    # 3. Send immediate progress message
     status_msg = await bot.send_message(
         chat_id,
-        f"⚡ <b>Cloning website &amp; extracting A to Z APIs...</b>\n\n"
+        f"⚡ <b>Smart Engine: Cloning &amp; Extracting APIs...</b>\n\n"
         f"🌐 <b>Target:</b> <code>{target_url}</code>\n"
-        f"⏳ <i>Please wait 3-5 seconds...</i>",
+        f"⏳ <i>Scanning HTML, JS, CSS &amp; Backend Endpoints...</i>",
         reply_to_message_id=msg_id
     )
     status_id = status_msg.get("message_id") if status_msg else None
 
     start_time = time.time()
 
-    # 4. Perform Scraping and Intel Analysis
+    # 4. Perform Smart Scraping and Intel Analysis
     try:
         scraper = WebScraper(target_url=target_url, timeout=7.0, max_concurrency=25)
         html_code, files_map, intel = await scraper.clone_website()
@@ -195,13 +201,12 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
             reply_to_message_id=msg_id
         )
 
-        # Delete or update status message
         if status_id:
             if not success:
                 await bot.edit_message(
                     chat_id,
                     status_id,
-                    "⚠️ <i>ZIP file created but Telegram failed to receive it (file might be too large).</i>"
+                    "⚠️ <i>ZIP file created but upload failed (file might be too large for Telegram API).</i>"
                 )
             else:
                 await bot.edit_message(
