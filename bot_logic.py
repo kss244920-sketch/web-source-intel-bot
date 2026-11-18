@@ -58,7 +58,7 @@ def extract_target_url(text: str) -> Optional[str]:
 
 
 class TelegramBotClient:
-    """Async Client for Telegram Bot API with Inline Keyboard & Document support."""
+    """Async Client for Telegram Bot API with Native Colored Button Styles."""
 
     def __init__(self, bot_token: str):
         self.bot_token = bot_token.strip()
@@ -180,56 +180,56 @@ class TelegramBotClient:
 
 
 def get_force_join_keyboard() -> Dict[str, Any]:
-    """Generates Force Join inline buttons with color badges."""
+    """Force Join keyboard with True Telegram Colors (primary, success, danger)."""
     return {
         "inline_keyboard": [
             [
-                {"text": "🟢 📢 Join Official Channel", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}"}
+                {"text": "📢 Join Channel (@OwAbyss)", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}", "style": "primary"}
             ],
             [
-                {"text": "👑 Contact Owner", "url": f"https://t.me/{OWNER_USERNAME}"},
-                {"text": "🔄 Joined / Verify", "callback_data": "check_join"}
+                {"text": "🔄 Joined / Verify", "callback_data": "check_join", "style": "success"},
+                {"text": "👑 Contact Owner", "url": f"https://t.me/{OWNER_USERNAME}", "style": "danger"}
             ]
         ]
     }
 
 
 def get_home_keyboard() -> Dict[str, Any]:
-    """Generates Main Menu inline buttons with color badges."""
+    """Main Menu keyboard with True Telegram Colors."""
     return {
         "inline_keyboard": [
             [
-                {"text": "🟢 📢 Updates Channel", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}"},
-                {"text": "👑 Bot Owner", "url": f"https://t.me/{OWNER_USERNAME}"}
+                {"text": "📢 Updates Channel", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}", "style": "primary"},
+                {"text": "👑 Owner (@owAtom)", "url": f"https://t.me/{OWNER_USERNAME}", "style": "danger"}
             ],
             [
-                {"text": "ℹ️ Help & Features Guide", "callback_data": "help_info"}
+                {"text": "ℹ️ Help & Features Guide", "callback_data": "help_info", "style": "primary"}
             ]
         ]
     }
 
 
 def get_action_selection_keyboard(url_hash: str) -> Dict[str, Any]:
-    """Generates Vibrant Colored Buttons for Specific File / Package selection."""
+    """Control panel keyboard with True Telegram Colors (Green=success, Blue=primary, Red=danger)."""
     return {
         "inline_keyboard": [
             [
-                {"text": "🟢 📦 Full Website ZIP (All in One)", "callback_data": f"dl_full:{url_hash}"}
+                {"text": "⚡ Full Website Source (ZIP)", "callback_data": f"dl_full:{url_hash}", "style": "success"}
             ],
             [
-                {"text": "🔵 🔌 Only APIs & Secrets (.TXT)", "callback_data": f"dl_api:{url_hash}"}
+                {"text": "🔌 Extract APIs & Secrets (.TXT)", "callback_data": f"dl_api:{url_hash}", "style": "primary"},
+                {"text": "📄 Single Clean HTML", "callback_data": f"dl_html:{url_hash}", "style": "primary"}
             ],
             [
-                {"text": "🟡 📜 JavaScript Files (.JS)", "callback_data": f"dl_js:{url_hash}"},
-                {"text": "🔴 🎨 CSS Stylesheets (.CSS)", "callback_data": f"dl_css:{url_hash}"}
+                {"text": "📜 JavaScript Files (.JS)", "callback_data": f"dl_js:{url_hash}", "style": "primary"},
+                {"text": "🎨 CSS Stylesheets", "callback_data": f"dl_css:{url_hash}", "style": "primary"}
             ],
             [
-                {"text": "📄 Single Clean HTML", "callback_data": f"dl_html:{url_hash}"},
-                {"text": "🖼 Images & Media", "callback_data": f"dl_img:{url_hash}"}
+                {"text": "🖼 Images & Media Package", "callback_data": f"dl_img:{url_hash}", "style": "primary"}
             ],
             [
-                {"text": "👑 Owner: @owAtom", "url": f"https://t.me/{OWNER_USERNAME}"},
-                {"text": "📢 Channel", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}"}
+                {"text": "📢 Channel", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}", "style": "primary"},
+                {"text": "👑 Owner (@owAtom)", "url": f"https://t.me/{OWNER_USERNAME}", "style": "danger"}
             ]
         ]
     }
@@ -246,24 +246,24 @@ async def process_download_request(
     """Clones and delivers with real-time multi-stage visual progress bars."""
     start_time = time.time()
     try:
-        # Stage 1: Connecting & Bypassing (25%)
+        # Stage 1: Connecting (25%)
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"⚡ <b>Stage 1/4: Connecting to Domain...</b>\n"
+                f"⚡ <b>Connecting to Target...</b>\n"
                 f"{render_progress_bar(25)}\n\n"
-                f"🌐 <b>Target:</b> <code>{target_url}</code>\n"
+                f"🌐 <b>Domain:</b> <code>{target_url}</code>\n"
                 f"⏳ <i>Bypassing WAF &amp; fetching HTML structure...</i>"
             )
 
         scraper = WebScraper(target_url=target_url, timeout=7.0, max_concurrency=25)
         html_code, files_map, intel = await scraper.clone_website()
 
-        # Stage 2: Assets Downloaded (65%)
+        # Stage 2: Assets Captured (65%)
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"📥 <b>Stage 2/4: Assets Captured!</b>\n"
+                f"📥 <b>Assets Captured!</b>\n"
                 f"{render_progress_bar(65)}\n\n"
                 f"📁 <b>Files Downloaded:</b> {len(files_map)} assets\n"
                 f"🔍 <i>Extracting embedded APIs &amp; secrets...</i>"
@@ -273,15 +273,15 @@ async def process_download_request(
         total_apis = summary["statistics"]["total_relative_apis"] + summary["statistics"]["total_external_apis"]
         total_keys = summary["statistics"].get("total_secrets_detected", 0)
 
-        # Stage 3: Packaging & Compiling (90%)
+        # Stage 3: Packaging (90%)
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"📦 <b>Stage 3/4: Compiling Package...</b>\n"
+                f"📦 <b>Compiling Package...</b>\n"
                 f"{render_progress_bar(90)}\n\n"
-                f"🔌 <b>APIs Identified:</b> {total_apis} routes\n"
+                f"🔌 <b>APIs Found:</b> {total_apis} routes\n"
                 f"🔑 <b>Keys Detected:</b> {total_keys}\n"
-                f"🚀 <i>Packaging &amp; uploading to Telegram...</i>"
+                f"🚀 <i>Uploading to Telegram...</i>"
             )
 
         elapsed_time = round(time.time() - start_time, 2)
@@ -294,14 +294,14 @@ async def process_download_request(
 
             caption = (
                 f"╭────────────────────────╮\n"
-                f"     🔵 <b>APIs &amp; Secrets Extracted</b>\n"
+                f"     🔌 <b>APIs &amp; Secrets Extracted</b>\n"
                 f"╰────────────────────────╯\n\n"
                 f"🌐 <b>Domain</b> ›  <code>{scraper.domain}</code>\n"
                 f"🔌 <b>APIs Found</b> ›  {total_apis} Endpoints\n"
                 f"🔑 <b>Keys Detected</b> ›  {total_keys}\n"
                 f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
                 f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
-                f"📄 <i>Open the file above directly to view all discovered API routes &amp; tokens!</i>\n\n"
+                f"📄 <i>Open file above directly to view all discovered API routes &amp; tokens!</i>\n\n"
                 f"👑 <b>Owner:</b> @{OWNER_USERNAME}"
             )
             await bot.send_document(
@@ -348,9 +348,9 @@ async def process_download_request(
                 category=category
             )
             category_titles = {
-                "all": "🟢 <b>Full Website Source Complete</b>",
-                "js": "🟡 <b>JavaScript Files Package</b>",
-                "css": "🔴 <b>CSS Stylesheets Package</b>",
+                "all": "⚡ <b>Full Website Source Complete</b>",
+                "js": "📜 <b>JavaScript Files Package</b>",
+                "css": "🎨 <b>CSS Stylesheets Package</b>",
                 "images": "🖼 <b>Images &amp; Media Package</b>"
             }
             title = category_titles.get(category, "✅ <b>Download Complete</b>")
@@ -386,7 +386,7 @@ async def process_download_request(
                 status_id,
                 f"✅ <b>Delivered 100%!</b> ({elapsed_time}s)\n"
                 f"{render_progress_bar(100)}\n\n"
-                f"👉 Need another file? Choose above or send a new domain!"
+                f"👉 Need another file? Choose from the menu above!"
             )
 
     except Exception as e:
@@ -408,6 +408,7 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         cb_data = callback_query.get("data") or ""
         user = callback_query.get("from", {})
         user_id = user.get("id")
+        username = user.get("username", "User")
         msg = callback_query.get("message")
         chat_id = msg.get("chat", {}).get("id") if msg else None
         msg_id = msg.get("message_id") if msg else None
@@ -417,10 +418,13 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
             if is_member:
                 await bot.answer_callback_query(cb_id, "✅ Verified! Ab aap koi bhi link bhej sakte hain.", show_alert=False)
                 verified_text = (
-                    "🎉 <b>Channel Verification Successful!</b>\n\n"
-                    "Ab aap hamare **Smart WebSource &amp; Intel Bot** ko freely use kar sakte hain.\n\n"
-                    "👉 <b>Bas koi bhi link ya domain yahan bhejein:</b>\n"
-                    "<code>goagamea.com</code> ya <code>https://example.com</code>"
+                    f"⚡ <b>WebSource &amp; Intel Control Hub</b>\n\n"
+                    f"👋 <b>Welcome:</b> @{username} | 🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                    f"👑 <b>Status:</b> Verified User\n\n"
+                    f"🌐 <b>Active Engine:</b> High-Speed Source Cloner\n"
+                    f"🔌 <b>Intelligence:</b> A-to-Z API &amp; Secrets Scanner\n\n"
+                    f"👉 <b>Koi bhi link ya domain chat me bhejein:</b>\n"
+                    f"<code>goagamea.com</code> ya <code>https://example.com</code>"
                 )
                 if chat_id and msg_id:
                     await bot.edit_message(chat_id, msg_id, verified_text, reply_markup=get_home_keyboard())
@@ -434,13 +438,16 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
 
         elif cb_data == "help_info":
             help_text = (
-                "📖 <b>How to Use &amp; Features:</b>\n\n"
-                "1️⃣ <b>Zero Command:</b> Koi command likhne ki zaroorat nahi hai. Bas direct domain ya URL bhejo.\n"
-                "2️⃣ <b>Select Your Need:</b> Link bhejte hi colored buttons aayenge (Full ZIP, Only APIs, Only JS, Only CSS, ya Single HTML).\n"
-                "3️⃣ <b>Live Progress Bar:</b> Real-time <code>[▰▰▰▰▱▱▱▱]</code> progress status dikhta hai.\n"
-                "4️⃣ <b>A-to-Z API Extractor:</b> Website ke saare hidden routes aur keys 1 second me .TXT file me nikal sakte ho bina zip khole!\n\n"
-                f"👤 <b>Developer / Owner:</b> @{OWNER_USERNAME}\n"
-                f"📢 <b>Updates Channel:</b> @{FORCE_CHANNEL_USERNAME}"
+                f"⚡ <b>WebSource &amp; Intel Guide</b>\n\n"
+                f"👋 <b>User:</b> @{username} | 🆔 <code>{user_id}</code>\n\n"
+                "📌 <b>How to Use:</b>\n"
+                "• Direct koi bhi domain ya URL bhejo (e.g. <code>goagamea.com</code>)\n"
+                "• Turant control panel se choose karo kya download karna hai\n"
+                "• <b>Full ZIP:</b> Poora source code + assets\n"
+                "• <b>APIs &amp; Secrets:</b> Direct .TXT file bina zip khole\n"
+                "• <b>Single HTML:</b> Pure HTML code direct viewing ke liye\n\n"
+                f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n"
+                f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}"
             )
             await bot.answer_callback_query(cb_id)
             if chat_id and msg_id:
@@ -473,10 +480,10 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
 
             status_msg = await bot.send_message(
                 chat_id,
-                f"⚡ <b>Initializing Smart Engine...</b>\n"
+                f"⚡ <b>Processing Target...</b>\n"
                 f"{render_progress_bar(10)}\n\n"
-                f"🌐 <b>Target:</b> <code>{target_url}</code>\n"
-                f"📁 <i>Preparing {category.upper()} stream...</i>",
+                f"🌐 <b>Domain:</b> <code>{target_url}</code>\n"
+                f"📁 <i>Extracting {category.upper()} stream...</i>",
                 reply_to_message_id=msg_id
             )
             status_id = status_msg.get("message_id") if status_msg else None
@@ -501,6 +508,7 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     msg_id = message.get("message_id")
     user = message.get("from", {})
     user_id = user.get("id")
+    username = user.get("username", "User")
 
     if not chat_id or not text or not user_id:
         return
@@ -509,12 +517,12 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     is_member = await bot.is_user_joined(user_id)
     if not is_member:
         lock_text = (
-            f"🔒 <b>Access Locked! Force Join Required</b>\n\n"
-            f"Hamare bot ko use karne ke liye aapko hamara official channel join karna zaroori hai:\n\n"
+            f"🔒 <b>Access Locked: Channel Join Required</b>\n\n"
+            f"👋 <b>Welcome:</b> @{username} | 🆔 <code>{user_id}</code>\n\n"
+            f"Bot use karne ke liye hamara official channel join karein:\n"
             f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}\n"
             f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n\n"
-            f"👉 Pehle neeche diye gaye <b>Join Channel</b> button par click karke channel join karein, "
-            f"phir <b>Joined / Verify</b> par click karein!"
+            f"Neeche button dabakar channel join karein aur <b>Joined / Verify</b> click karein!"
         )
         await bot.send_message(
             chat_id,
@@ -527,18 +535,13 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     # 4. Handle /start and /help commands
     if text.startswith(("/start", "/help")):
         welcome_text = (
-            "🚀 <b>Smart WebSource &amp; Intel Extractor Bot</b>\n\n"
-            "Koi command likhne ki zaroorat nahi hai! Bas kisi bhi website ka link ya domain seedha yahan bhej dijiye.\n\n"
-            "✨ <b>Available Download Options:</b>\n"
-            "• 🟢 <b>Full Website ZIP:</b> Code, Assets, Images &amp; APIs\n"
-            "• 🔵 <b>Only APIs &amp; Secrets:</b> Direct .TXT file without zip\n"
-            "• 🟡 <b>JavaScript Files:</b> Only JS scripts &amp; logic\n"
-            "• 🔴 <b>CSS Stylesheets:</b> Only styles &amp; fonts\n"
-            "• 📄 <b>Single HTML:</b> Pure HTML code for easy viewing\n\n"
-            f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n"
-            f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}\n\n"
-            "👉 <b>Try it now:</b> Send any link directly:\n"
-            "<code>goagamea.com</code> ya <code>https://example.com</code>"
+            f"⚡ <b>WebSource &amp; Intel Control Hub</b>\n\n"
+            f"👋 <b>Welcome:</b> @{username} | 🆔 <b>ID:</b> <code>{user_id}</code>\n"
+            f"👑 <b>Role:</b> Verified User\n\n"
+            f"🌐 <b>Engine:</b> High-Speed Source Cloner\n"
+            f"🔌 <b>Scanner:</b> A-to-Z API &amp; Secrets Extractor\n\n"
+            f"Neeche diye gaye buttons use karein ya seedha koi bhi website link chat me bhejein:\n"
+            f"<code>goagamea.com</code> ya <code>https://example.com</code>"
         )
         await bot.send_message(
             chat_id,
@@ -554,7 +557,7 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     if not target_url:
         await bot.send_message(
             chat_id,
-            "💡 <b>Please send a valid website link or domain!</b>\n\n"
+            "💡 <b>Website link ya domain chat me bhejein:</b>\n\n"
             "Example:\n<code>goagamea.com</code>\nya\n<code>https://example.com</code>",
             reply_to_message_id=msg_id,
             reply_markup=get_home_keyboard()
@@ -565,11 +568,9 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     url_hash = make_url_hash(target_url)
 
     menu_text = (
-        f"╭────────────────────────╮\n"
-        f"     🌐 <b>Website Detected</b>\n"
-        f"╰────────────────────────╯\n\n"
-        f"🔗 <b>Target:</b> <code>{target_url}</code>\n\n"
-        f"⚡ <i>Aapko kya download karna hai? Neeche diye gaye button par click karein:</i>"
+        f"⚡ <b>Website Detected &amp; Ready</b>\n\n"
+        f"🌐 <b>Target:</b> <code>{target_url}</code>\n\n"
+        f"Aapko kya download karna hai? Neeche button click karein:"
     )
     await bot.send_message(
         chat_id,
