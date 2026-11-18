@@ -18,9 +18,7 @@ def sanitize_filename(filename: str, default: str = "asset") -> str:
     """Cleans a string to be safely used as a filename."""
     if not filename:
         return default
-    # Remove query string / hash
     name = filename.split('?')[0].split('#')[0]
-    # Remove illegal characters
     name = re.sub(r'[\\/*?:"<>|]', '_', name)
     name = os.path.basename(name)
     return name if name else default
@@ -53,14 +51,15 @@ def get_asset_folder_and_name(url: str, content_type: str = "") -> Tuple[str, st
 
 
 class WebScraper:
-    """Fast Async Website Cloner and Asset Downloader."""
+    """Enterprise Fast Async Website Cloner and Asset Downloader."""
 
-    def __init__(self, target_url: str, timeout: float = 8.0, max_concurrency: int = 20):
+    def __init__(self, target_url: str, timeout: float = 7.0, max_concurrency: int = 25, max_assets: int = 80):
         if not target_url.startswith(('http://', 'https://')):
             target_url = 'https://' + target_url
         self.target_url = target_url
         self.domain = urlparse(target_url).netloc
         self.timeout = timeout
+        self.max_assets = max_assets
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.client_headers = {
             "User-Agent": USER_AGENT,
@@ -75,6 +74,10 @@ class WebScraper:
             try:
                 resp = await client.get(url, timeout=self.timeout, follow_redirects=True)
                 if resp.status_code == 200:
+                    # Ignore single assets > 8MB to protect serverless memory
+                    content_length = int(resp.headers.get("content-length", len(resp.content)))
+                    if content_length > 8 * 1024 * 1024:
+                        return None
                     content_type = resp.headers.get("content-type", "").lower()
                     return url, resp.content, content_type
             except Exception:
@@ -83,12 +86,8 @@ class WebScraper:
 
     async def clone_website(self) -> Tuple[str, Dict[str, bytes], IntelExtractor]:
         """
-        Downloads HTML and all linked assets (CSS, JS, Images, Fonts).
+        Downloads HTML and all linked assets (CSS, JS, Images, Fonts, CSS Sub-assets).
         Rewrites URLs for offline viewing.
-        Returns:
-            - modified_html: str
-            - files_map: dict of relative_filepath -> bytes
-            - intel: IntelExtractor instance with all discovered APIs and keys
         """
         files_map: Dict[str, bytes] = {}
         download_queue: List[str] = []
@@ -114,8 +113,11 @@ class WebScraper:
             soup = BeautifulSoup(raw_html, "html.parser")
             self.intel.extract_metadata_from_soup(soup)
 
-            # 2. Extract and queue assets from HTML
-            # Tags to search: (tag_name, attribute)
+            # Check for <base href="...">
+            base_tag = soup.find('base')
+            effective_base_url = urljoin(final_url, base_tag.get('href', '')) if base_tag and base_tag.get('href') else final_url
+
+            # 2. Extract and queue assets from HTML tags
             tag_attrs = [
                 ("link", "href"),
                 ("script", "src"),
@@ -131,18 +133,39 @@ class WebScraper:
                     val = elem.get(attr)
                     if not val or val.startswith("data:"):
                         continue
-                    full_url = urljoin(final_url, val)
+                    full_url = urljoin(effective_base_url, val)
                     if full_url not in download_queue:
                         download_queue.append(full_url)
 
-            # Also scan inline scripts for endpoints
-            for s in soup.find_all("script"):
-                if s.string:
-                    self.intel.analyze_text(s.string, source_label="inline_script")
+            # Also parse srcset for responsive images
+            for img in soup.find_all("img"):
+                srcset = img.get("srcset")
+                if srcset:
+                    for part in srcset.split(","):
+                        u = part.strip().split()[0]
+                        if u and not u.startswith("data:"):
+                            full_url = urljoin(effective_base_url, u)
+                            if full_url not in download_queue:
+                                download_queue.append(full_url)
 
-            # 3. Asynchronously download all assets
+            # Extract inline style urls
+            for elem in soup.find_all(style=True):
+                style_text = elem["style"]
+                for match in CSS_URL_REGEX.findall(style_text):
+                    clean_u = match.strip()
+                    if clean_u and not clean_u.startswith("data:"):
+                        full_u = urljoin(effective_base_url, clean_u)
+                        if full_u not in download_queue:
+                            download_queue.append(full_u)
+
+            # Cap total queue to max_assets to ensure fast processing
+            download_queue = download_queue[:self.max_assets]
+
+            # 3. Asynchronously download all queued assets
             tasks = [self._fetch_url(client, u) for u in download_queue]
             results = await asyncio.gather(*tasks)
+
+            css_sub_assets_queue = []
 
             # 4. Process downloaded assets and map to local file paths
             for res in results:
@@ -164,7 +187,7 @@ class WebScraper:
                 files_map[local_path] = content_bytes
                 url_to_local_path[orig_url] = local_path
 
-                # If asset is JS, scan deeply for APIs & Secrets!
+                # If asset is JS, scan deeply for APIs & Secrets
                 if "assets/js" in folder or "javascript" in content_type:
                     try:
                         js_text = content_bytes.decode("utf-8", errors="ignore")
@@ -172,15 +195,48 @@ class WebScraper:
                     except Exception:
                         pass
 
+                # If asset is CSS, extract nested fonts and images
+                if "assets/css" in folder or "css" in content_type:
+                    try:
+                        css_text = content_bytes.decode("utf-8", errors="ignore")
+                        for css_u in CSS_URL_REGEX.findall(css_text):
+                            css_u = css_u.strip()
+                            if css_u and not css_u.startswith("data:"):
+                                full_css_asset = urljoin(orig_url, css_u)
+                                if full_css_asset not in url_to_local_path and full_css_asset not in css_sub_assets_queue:
+                                    css_sub_assets_queue.append((orig_url, css_u, full_css_asset))
+                    except Exception:
+                        pass
+
+            # Download sub-assets (fonts/images inside CSS)
+            if css_sub_assets_queue:
+                sub_tasks = [self._fetch_url(client, item[2]) for item in css_sub_assets_queue[:25]]
+                sub_results = await asyncio.gather(*sub_tasks)
+                for s_res in sub_results:
+                    if not s_res:
+                        continue
+                    s_orig_url, s_content, s_type = s_res
+                    s_folder, s_base = get_asset_folder_and_name(s_orig_url, s_type)
+                    s_cnt = name_counter.get(s_base, 0)
+                    name_counter[s_base] = s_cnt + 1
+                    s_fname = f"{os.path.splitext(s_base)[0]}_{s_cnt}{os.path.splitext(s_base)[1]}" if s_cnt > 0 else s_base
+                    s_local = f"{s_folder}/{s_fname}"
+                    files_map[s_local] = s_content
+                    url_to_local_path[s_orig_url] = s_local
+
             # 5. Rewrite URLs in HTML for 100% offline viewing
             for tag, attr in tag_attrs:
                 for elem in soup.find_all(tag):
                     val = elem.get(attr)
                     if not val or val.startswith("data:"):
                         continue
-                    full_url = urljoin(final_url, val)
+                    full_url = urljoin(effective_base_url, val)
                     if full_url in url_to_local_path:
                         elem[attr] = url_to_local_path[full_url]
+
+            # Remove base tag if present so local relative paths resolve properly
+            if base_tag:
+                base_tag.decompose()
 
             # Save modified index.html
             modified_html = str(soup)

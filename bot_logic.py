@@ -182,8 +182,8 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
             f"🔑 <b>Configs/Keys</b> ›  {stats['keys_count']} Detected\n"
             f"⏱ <b>Time</b> ›  {elapsed_time}s\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🚀 <i>Advance WebSource &amp; Intel Bot</i>\n"
-            f"📁 <i>Check <code>INTEL_REPORT/</code> folder inside ZIP for all APIs!</i>"
+            f"👤 <b>Downloaded By</b> ›  @ExtractWebScBot 🚀\n"
+            f"📁 <i>Check <code>INTEL_REPORT/</code> folder inside ZIP for all extracted APIs!</i>"
         )
 
         # 6. Upload ZIP to Telegram

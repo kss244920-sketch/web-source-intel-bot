@@ -65,7 +65,7 @@ class ZipPackager:
             "external_apis_count": summary["statistics"]["total_external_apis"],
             "total_apis": summary["statistics"]["total_relative_apis"] + summary["statistics"]["total_external_apis"],
             "websockets_count": summary["statistics"]["total_websockets"],
-            "keys_count": summary["statistics"]["total_keys_found"],
+            "keys_count": summary["statistics"].get("total_secrets_detected", 0),
             "title": intel.metadata.get("title", domain)
         }
 
