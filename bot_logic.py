@@ -18,6 +18,13 @@ FORCE_CHANNEL_ID = -1003810383682
 URL_CACHE: Dict[str, str] = {}
 
 
+def render_progress_bar(percent: int, length: int = 10) -> str:
+    """Generates visual high-tech progress meter string."""
+    filled = max(0, min(length, int(length * percent / 100)))
+    empty = length - filled
+    return f"[{'▰' * filled}{'▱' * empty}] {percent}%"
+
+
 def make_url_hash(url: str) -> str:
     """Creates a short 8-char hash of the URL for Telegram callback data."""
     h = hashlib.md5(url.strip().lower().encode("utf-8")).hexdigest()[:8]
@@ -236,11 +243,47 @@ async def process_download_request(
     status_id: Optional[int] = None,
     reply_to_msg_id: Optional[int] = None
 ) -> None:
-    """Clones and delivers the exact requested category or full package."""
+    """Clones and delivers with real-time multi-stage visual progress bars."""
     start_time = time.time()
     try:
+        # Stage 1: Connecting & Bypassing (25%)
+        if status_id:
+            await bot.edit_message(
+                chat_id, status_id,
+                f"⚡ <b>Stage 1/4: Connecting to Domain...</b>\n"
+                f"{render_progress_bar(25)}\n\n"
+                f"🌐 <b>Target:</b> <code>{target_url}</code>\n"
+                f"⏳ <i>Bypassing WAF &amp; fetching HTML structure...</i>"
+            )
+
         scraper = WebScraper(target_url=target_url, timeout=7.0, max_concurrency=25)
         html_code, files_map, intel = await scraper.clone_website()
+
+        # Stage 2: Assets Downloaded (65%)
+        if status_id:
+            await bot.edit_message(
+                chat_id, status_id,
+                f"📥 <b>Stage 2/4: Assets Captured!</b>\n"
+                f"{render_progress_bar(65)}\n\n"
+                f"📁 <b>Files Downloaded:</b> {len(files_map)} assets\n"
+                f"🔍 <i>Extracting embedded APIs &amp; secrets...</i>"
+            )
+
+        summary = intel.get_summary_report()
+        total_apis = summary["statistics"]["total_relative_apis"] + summary["statistics"]["total_external_apis"]
+        total_keys = summary["statistics"].get("total_secrets_detected", 0)
+
+        # Stage 3: Packaging & Compiling (90%)
+        if status_id:
+            await bot.edit_message(
+                chat_id, status_id,
+                f"📦 <b>Stage 3/4: Compiling Package...</b>\n"
+                f"{render_progress_bar(90)}\n\n"
+                f"🔌 <b>APIs Identified:</b> {total_apis} routes\n"
+                f"🔑 <b>Keys Detected:</b> {total_keys}\n"
+                f"🚀 <i>Packaging &amp; uploading to Telegram...</i>"
+            )
+
         elapsed_time = round(time.time() - start_time, 2)
 
         # 1. ONLY APIs & SECRETS (Sends as instant TXT document)
@@ -248,9 +291,6 @@ async def process_download_request(
             text_report = intel.generate_text_report()
             txt_bytes = text_report.encode("utf-8")
             filename = f"apis_{scraper.domain.replace('.', '_')}.txt"
-            summary = intel.get_summary_report()
-            total_apis = summary["statistics"]["total_relative_apis"] + summary["statistics"]["total_external_apis"]
-            total_keys = summary["statistics"].get("total_secrets_detected", 0)
 
             caption = (
                 f"╭────────────────────────╮\n"
@@ -259,7 +299,8 @@ async def process_download_request(
                 f"🌐 <b>Domain</b> ›  <code>{scraper.domain}</code>\n"
                 f"🔌 <b>APIs Found</b> ›  {total_apis} Endpoints\n"
                 f"🔑 <b>Keys Detected</b> ›  {total_keys}\n"
-                f"⏱ <b>Time</b> ›  {elapsed_time}s\n\n"
+                f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
+                f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
                 f"📄 <i>Open the file above directly to view all discovered API routes &amp; tokens!</i>\n\n"
                 f"👑 <b>Owner:</b> @{OWNER_USERNAME}"
             )
@@ -283,7 +324,8 @@ async def process_download_request(
                 f"╰────────────────────────╯\n\n"
                 f"🌐 <b>Domain</b> ›  <code>{scraper.domain}</code>\n"
                 f"📦 <b>Size</b> ›  {round(len(html_bytes)/1024, 1)} KB\n"
-                f"⏱ <b>Time</b> ›  {elapsed_time}s\n\n"
+                f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
+                f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
                 f"📄 <i>Single clean HTML file (Open in any browser or editor).</i>\n\n"
                 f"👑 <b>Owner:</b> @{OWNER_USERNAME}"
             )
@@ -322,7 +364,8 @@ async def process_download_request(
                 f"📁 <b>Files</b> ›  {stats['total_files']}\n"
                 f"🔌 <b>APIs Found</b> ›  {stats['total_apis']} Endpoints\n"
                 f"🔑 <b>Configs/Keys</b> ›  {stats['keys_count']} Detected\n"
-                f"⏱ <b>Time</b> ›  {elapsed_time}s\n\n"
+                f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
+                f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👑 <b>Owner</b> ›  @{OWNER_USERNAME}\n"
                 f"📢 <b>Channel</b> ›  @{FORCE_CHANNEL_USERNAME}"
@@ -341,7 +384,9 @@ async def process_download_request(
             await bot.edit_message(
                 chat_id,
                 status_id,
-                f"✅ <b>Delivered!</b> ({elapsed_time}s) — Need another file? Select above or send a new link!"
+                f"✅ <b>Delivered 100%!</b> ({elapsed_time}s)\n"
+                f"{render_progress_bar(100)}\n\n"
+                f"👉 Need another file? Choose above or send a new domain!"
             )
 
     except Exception as e:
@@ -392,7 +437,8 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
                 "📖 <b>How to Use &amp; Features:</b>\n\n"
                 "1️⃣ <b>Zero Command:</b> Koi command likhne ki zaroorat nahi hai. Bas direct domain ya URL bhejo.\n"
                 "2️⃣ <b>Select Your Need:</b> Link bhejte hi colored buttons aayenge (Full ZIP, Only APIs, Only JS, Only CSS, ya Single HTML).\n"
-                "3️⃣ <b>A-to-Z API Extractor:</b> Website ke saare hidden routes aur keys 1 second me .TXT file me nikal sakte ho bina zip khole!\n\n"
+                "3️⃣ <b>Live Progress Bar:</b> Real-time <code>[▰▰▰▰▱▱▱▱]</code> progress status dikhta hai.\n"
+                "4️⃣ <b>A-to-Z API Extractor:</b> Website ke saare hidden routes aur keys 1 second me .TXT file me nikal sakte ho bina zip khole!\n\n"
                 f"👤 <b>Developer / Owner:</b> @{OWNER_USERNAME}\n"
                 f"📢 <b>Updates Channel:</b> @{FORCE_CHANNEL_USERNAME}"
             )
@@ -427,8 +473,10 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
 
             status_msg = await bot.send_message(
                 chat_id,
-                f"⚡ <b>Processing:</b> <code>{target_url}</code>\n"
-                f"📁 <i>Extracting requested package ({category.upper()})...</i>",
+                f"⚡ <b>Initializing Smart Engine...</b>\n"
+                f"{render_progress_bar(10)}\n\n"
+                f"🌐 <b>Target:</b> <code>{target_url}</code>\n"
+                f"📁 <i>Preparing {category.upper()} stream...</i>",
                 reply_to_message_id=msg_id
             )
             status_id = status_msg.get("message_id") if status_msg else None
