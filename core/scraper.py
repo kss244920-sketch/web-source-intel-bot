@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import json
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, Set
 from urllib.parse import urljoin, urlparse, unquote
 from bs4 import BeautifulSoup
 import httpx
@@ -24,52 +24,55 @@ CHROME_DESKTOP_HEADERS = {
     "Upgrade-Insecure-Requests": "1"
 }
 
-# Mobile User-Agent fallback in case desktop gets challenged
 MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-# Regex for CSS url(...) references and SourceMapping
+# Regex for CSS url(...) and SourceMapping
 CSS_URL_REGEX = re.compile(r"""url\(\s*['"]?(?!data:)([^'")]+)['"]?\s*\)""", re.IGNORECASE)
 SOURCEMAP_REGEX = re.compile(r"""//[#@]\s*sourceMappingURL=([^\s]+)""", re.IGNORECASE)
 
-
-def sanitize_filename(filename: str, default: str = "asset") -> str:
-    """Cleans a string to be safely used as a filename."""
-    if not filename:
-        return default
-    name = filename.split('?')[0].split('#')[0]
-    name = re.sub(r'[\\/*?:"<>|]', '_', name)
-    name = os.path.basename(name)
-    return name if name else default
+# Regex to detect Webpack, Vite, Nuxt, Next.js dynamic chunk imports inside JS
+CHUNK_REGEX = re.compile(
+    r"""(?:/|\./|["'`])((?:assets/js|assets/css|static/chunks|_next/static/chunks|_nuxt|static/js)/[a-zA-Z0-9_\-]+\.(?:js|css))["'`]""",
+    re.IGNORECASE
+)
 
 
-def get_asset_folder_and_name(url: str, content_type: str = "") -> Tuple[str, str]:
-    """Determines asset category folder and safe filename."""
+def get_clean_relative_path(url: str, content_type: str = "") -> str:
+    """Determines accurate, clean relative file path preserving original directory hierarchy."""
     parsed = urlparse(url)
-    raw_name = sanitize_filename(unquote(parsed.path))
-    ext = os.path.splitext(raw_name)[1].lower()
+    raw_path = unquote(parsed.path).lstrip("/")
+    
+    # If path is empty, make it index.html
+    if not raw_path:
+        return "index.html"
 
-    if ext in ['.css'] or 'css' in content_type:
-        folder = "assets/css"
-        if not ext:
-            raw_name += ".css"
-    elif ext in ['.js', '.mjs', '.cjs'] or 'javascript' in content_type:
-        folder = "assets/js"
-        if not ext:
-            raw_name += ".js"
-    elif ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.avif'] or 'image' in content_type:
-        folder = "assets/images"
-        if not ext:
-            raw_name += ".png"
-    elif ext in ['.woff', '.woff2', '.ttf', '.otf', '.eot'] or 'font' in content_type:
-        folder = "assets/fonts"
-    elif ext in ['.json', '.webmanifest'] or 'json' in content_type:
-        folder = "assets/configs"
-    elif ext in ['.mp4', '.webm', '.ogg', '.mp3', '.wav'] or 'audio' in content_type or 'video' in content_type:
-        folder = "assets/media"
-    else:
-        folder = "assets/misc"
+    # Strip illegal characters
+    parts = raw_path.split("/")
+    cleaned_parts = [re.sub(r'[\\:*?"<>|]', '_', p) for p in parts if p]
+    if not cleaned_parts:
+        cleaned_parts = ["asset"]
 
-    return folder, raw_name
+    filename = cleaned_parts[-1]
+    name, ext = os.path.splitext(filename)
+
+    # If file has no extension, infer from Content-Type
+    if not ext:
+        if 'javascript' in content_type:
+            cleaned_parts[-1] = filename + ".js"
+        elif 'css' in content_type:
+            cleaned_parts[-1] = filename + ".css"
+        elif 'json' in content_type:
+            cleaned_parts[-1] = filename + ".json"
+        elif 'png' in content_type:
+            cleaned_parts[-1] = filename + ".png"
+        elif 'jpeg' in content_type or 'jpg' in content_type:
+            cleaned_parts[-1] = filename + ".jpg"
+        elif 'svg' in content_type:
+            cleaned_parts[-1] = filename + ".svg"
+        elif 'font' in content_type or 'woff2' in content_type:
+            cleaned_parts[-1] = filename + ".woff2"
+
+    return "/".join(cleaned_parts)
 
 
 def format_js_code(code: str) -> str:
@@ -77,7 +80,6 @@ def format_js_code(code: str) -> str:
     if len(code) < 300 or code.count('\n') > len(code) / 120:
         return code
     try:
-        # Add clean linebreaks after semicolons and braces
         formatted = re.sub(r';(?!\s*\n)', ';\n', code)
         formatted = re.sub(r'([{}])', r'\n\1\n', formatted)
         formatted = re.sub(r'\n{2,}', '\n', formatted)
@@ -87,15 +89,15 @@ def format_js_code(code: str) -> str:
 
 
 class WebScraper:
-    """Smart Async Website Cloner, Deep Source-Map Unpacker and Asset Downloader."""
+    """True Deep Website Cloner, Recursive Chunk Spider & Source-Map Unpacker."""
 
-    def __init__(self, target_url: str, timeout: float = 7.0, max_concurrency: int = 25, max_assets: int = 90):
+    def __init__(self, target_url: str, timeout: float = 7.0, max_concurrency: int = 30, max_chunks: int = 150):
         if not target_url.startswith(('http://', 'https://')):
             target_url = 'https://' + target_url
         self.target_url = target_url
         self.domain = urlparse(target_url).netloc
         self.timeout = timeout
-        self.max_assets = max_assets
+        self.max_chunks = max_chunks
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.intel = IntelExtractor(self.target_url)
 
@@ -116,21 +118,22 @@ class WebScraper:
 
     async def clone_website(self) -> Tuple[str, Dict[str, bytes], IntelExtractor]:
         """
-        Deep Cloner & Source Map Unpacker:
-        - Downloads HTML with Chrome headers and fallback support.
-        - Deep extracts HTML, CSS, JS, Fonts, Media, Manifests, and SVG icons.
-        - Detects and unpacks .js.map Source Maps into original unminified code!
+        Deep Spider Cloner:
+        - Downloads HTML.
+        - Spiders and recursively downloads all dynamic Webpack/Vite chunks.
+        - Scans every chunk for hidden APIs, routes, and secrets.
+        - Unpacks sourcemaps if available.
         - Rewrites URLs for offline viewing.
         """
         files_map: Dict[str, bytes] = {}
         download_queue: List[str] = []
+        downloaded_urls: Set[str] = set()
         url_to_local_path: Dict[str, str] = {}
-        name_counter: Dict[str, int] = {}
-        sourcemap_candidates: List[Tuple[str, str]] = []  # (orig_js_url, map_url)
+        sourcemap_candidates: List[Tuple[str, str]] = []
 
         transport = httpx.AsyncHTTPTransport(retries=2, verify=False)
         async with httpx.AsyncClient(headers=CHROME_DESKTOP_HEADERS, transport=transport) as client:
-            # 1. Fetch main HTML page with smart fallback
+            # 1. Fetch main HTML page
             try:
                 html_resp = await client.get(self.target_url, timeout=self.timeout, follow_redirects=True)
                 if html_resp.status_code in [403, 406]:
@@ -157,17 +160,16 @@ class WebScraper:
             parts = self.intel.domain.split(".")
             self.intel.root_domain = ".".join(parts[-2:]) if len(parts) >= 2 else self.intel.domain
 
-            # Scan raw HTML for APIs & Keys
+            # Scan raw HTML
             self.intel.analyze_text(raw_html, source_label="index.html")
 
             soup = BeautifulSoup(raw_html, "html.parser")
             self.intel.extract_metadata_from_soup(soup)
 
-            # Check for <base href="...">
             base_tag = soup.find('base')
             effective_base = urljoin(final_url, base_tag.get('href', '')) if base_tag and base_tag.get('href') else final_url
 
-            # 2. Smart Asset Discovery across HTML5 tags
+            # 2. Extract initial assets from HTML tags
             tag_attrs = [
                 ("link", "href"),
                 ("script", "src"),
@@ -177,10 +179,6 @@ class WebScraper:
                 ("video", "src"),
                 ("video", "poster"),
                 ("audio", "src"),
-                ("object", "data"),
-                ("embed", "src"),
-                ("use", "href"),
-                ("use", "xlink:href"),
             ]
 
             for tag, attr in tag_attrs:
@@ -192,117 +190,92 @@ class WebScraper:
                     if full_url not in download_queue:
                         download_queue.append(full_url)
 
-            # Parse srcset for high-res responsive images
-            for elem in soup.find_all(["img", "source"]):
-                srcset = elem.get("srcset")
-                if srcset:
-                    for part in srcset.split(","):
-                        u = part.strip().split()[0]
-                        if u and not u.startswith("data:"):
-                            full_url = urljoin(effective_base, u)
-                            if full_url not in download_queue:
-                                download_queue.append(full_url)
-
-            # OpenGraph Image & Favicons
-            og_img = soup.find("meta", property="og:image")
-            if og_img and og_img.get("content"):
-                full_og = urljoin(effective_base, og_img.get("content"))
-                if full_og not in download_queue:
-                    download_queue.append(full_og)
-
-            # Inline style background urls
-            for elem in soup.find_all(style=True):
-                style_text = elem["style"]
-                for match in CSS_URL_REGEX.findall(style_text):
-                    clean_u = match.strip()
-                    if clean_u and not clean_u.startswith("data:"):
-                        full_u = urljoin(effective_base, clean_u)
-                        if full_u not in download_queue:
-                            download_queue.append(full_u)
-
-            # Cap total queue to max_assets
-            download_queue = download_queue[:self.max_assets]
-
-            # 3. Asynchronously download all queued assets
-            tasks = [self._fetch_url(client, u) for u in download_queue]
+            # 3. Round 1: Asynchronously download initial assets
+            tasks = [self._fetch_url(client, u) for u in download_queue[:60]]
             results = await asyncio.gather(*tasks)
 
-            css_sub_assets_queue = []
+            dynamic_chunks_queue: List[str] = []
 
-            # 4. Process downloaded assets and map to local paths
             for res in results:
                 if not res:
                     continue
                 orig_url, content_bytes, content_type = res
-                folder, base_name = get_asset_folder_and_name(orig_url, content_type)
-
-                counter = name_counter.get(base_name, 0)
-                name_counter[base_name] = counter + 1
-                if counter > 0:
-                    stem, ext = os.path.splitext(base_name)
-                    final_filename = f"{stem}_{counter}{ext}"
-                else:
-                    final_filename = base_name
-
-                local_path = f"{folder}/{final_filename}"
+                downloaded_urls.add(orig_url)
+                local_path = get_clean_relative_path(orig_url, content_type)
                 files_map[local_path] = content_bytes
                 url_to_local_path[orig_url] = local_path
 
-                # Deep scan JS files for APIs, Secrets, and SourceMaps
-                if "assets/js" in folder or "javascript" in content_type:
+                # Deep scan JS & spider dynamic chunks
+                if local_path.endswith(".js") or "javascript" in content_type:
                     try:
                         js_text = content_bytes.decode("utf-8", errors="ignore")
                         self.intel.analyze_text(js_text, source_label=local_path)
 
-                        # Format minified JS for developer readability
-                        formatted_js = format_js_code(js_text)
-                        if formatted_js != js_text:
-                            files_map[local_path] = formatted_js.encode("utf-8")
+                        # SPIDER: Extract all referenced dynamic Webpack/Vite chunks
+                        for match in CHUNK_REGEX.findall(js_text):
+                            chunk_path = match.strip()
+                            full_chunk_url = urljoin(final_url, chunk_path)
+                            if full_chunk_url not in downloaded_urls and full_chunk_url not in dynamic_chunks_queue:
+                                dynamic_chunks_queue.append(full_chunk_url)
 
-                        # Check for SourceMappingURL
+                        # Format minified JS
+                        formatted = format_js_code(js_text)
+                        if formatted != js_text:
+                            files_map[local_path] = formatted.encode("utf-8")
+
+                        # Check for SourceMaps
                         sm_match = SOURCEMAP_REGEX.search(js_text)
                         if sm_match:
                             sm_url = urljoin(orig_url, sm_match.group(1).strip())
                             sourcemap_candidates.append((orig_url, sm_url))
                         elif orig_url.endswith(".js"):
-                            # Opportunistically check .js.map
                             sourcemap_candidates.append((orig_url, orig_url + ".map"))
                     except Exception:
                         pass
 
-                # Scan CSS for fonts and images
-                if "assets/css" in folder or "css" in content_type:
+                # Scan CSS for fonts and background images
+                if local_path.endswith(".css") or "css" in content_type:
                     try:
                         css_text = content_bytes.decode("utf-8", errors="ignore")
                         for css_u in CSS_URL_REGEX.findall(css_text):
                             css_u = css_u.strip()
                             if css_u and not css_u.startswith("data:"):
                                 full_css_asset = urljoin(orig_url, css_u)
-                                if full_css_asset not in url_to_local_path and full_css_asset not in css_sub_assets_queue:
-                                    css_sub_assets_queue.append((orig_url, css_u, full_css_asset))
+                                if full_css_asset not in downloaded_urls and full_css_asset not in dynamic_chunks_queue:
+                                    dynamic_chunks_queue.append(full_css_asset)
                     except Exception:
                         pass
 
-            # Download sub-assets (fonts/images inside CSS)
-            if css_sub_assets_queue:
-                sub_tasks = [self._fetch_url(client, item[2]) for item in css_sub_assets_queue[:30]]
-                sub_results = await asyncio.gather(*sub_tasks)
-                for s_res in sub_results:
-                    if not s_res:
+            # 4. Round 2: DYNAMIC CHUNKS SPIDER (Download up to max_chunks referenced JS chunks!)
+            if dynamic_chunks_queue:
+                chunk_tasks = [self._fetch_url(client, u) for u in dynamic_chunks_queue[:self.max_chunks]]
+                chunk_results = await asyncio.gather(*chunk_tasks)
+
+                for c_res in chunk_results:
+                    if not c_res:
                         continue
-                    s_orig_url, s_content, s_type = s_res
-                    s_folder, s_base = get_asset_folder_and_name(s_orig_url, s_type)
-                    s_cnt = name_counter.get(s_base, 0)
-                    name_counter[s_base] = s_cnt + 1
-                    s_fname = f"{os.path.splitext(s_base)[0]}_{s_cnt}{os.path.splitext(s_base)[1]}" if s_cnt > 0 else s_base
-                    s_local = f"{s_folder}/{s_fname}"
-                    files_map[s_local] = s_content
-                    url_to_local_path[s_orig_url] = s_local
+                    c_url, c_bytes, c_type = c_res
+                    downloaded_urls.add(c_url)
+                    c_local_path = get_clean_relative_path(c_url, c_type)
+                    files_map[c_local_path] = c_bytes
+                    url_to_local_path[c_url] = c_local_path
+
+                    # Deep Scan the internal chunk for APIs & Routes
+                    if c_local_path.endswith(".js") or "javascript" in c_type:
+                        try:
+                            c_text = c_bytes.decode("utf-8", errors="ignore")
+                            self.intel.analyze_text(c_text, source_label=c_local_path)
+
+                            # Check for sourcemap in chunk
+                            sm_match = SOURCEMAP_REGEX.search(c_text)
+                            if sm_match:
+                                sourcemap_candidates.append((c_url, urljoin(c_url, sm_match.group(1).strip())))
+                        except Exception:
+                            pass
 
             # 5. SOURCE MAP DEEP UNPACKER (.map files)
             if sourcemap_candidates:
-                # Limit to top 5 sourcemap checks to preserve fast execution
-                sm_tasks = [self._fetch_url(client, candidate[1]) for candidate in sourcemap_candidates[:5]]
+                sm_tasks = [self._fetch_url(client, candidate[1]) for candidate in sourcemap_candidates[:6]]
                 sm_results = await asyncio.gather(*sm_tasks)
                 for sm_res in sm_results:
                     if not sm_res:
@@ -331,7 +304,6 @@ class WebScraper:
                     if full_url in url_to_local_path:
                         elem[attr] = url_to_local_path[full_url]
 
-            # Remove base tag
             if base_tag:
                 base_tag.decompose()
 
