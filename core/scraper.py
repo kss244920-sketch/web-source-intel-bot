@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import json
 from typing import Dict, Tuple, List, Optional
 from urllib.parse import urljoin, urlparse, unquote
 from bs4 import BeautifulSoup
@@ -26,8 +27,9 @@ CHROME_DESKTOP_HEADERS = {
 # Mobile User-Agent fallback in case desktop gets challenged
 MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
-# Regex for CSS url(...) references
+# Regex for CSS url(...) references and SourceMapping
 CSS_URL_REGEX = re.compile(r"""url\(\s*['"]?(?!data:)([^'")]+)['"]?\s*\)""", re.IGNORECASE)
+SOURCEMAP_REGEX = re.compile(r"""//[#@]\s*sourceMappingURL=([^\s]+)""", re.IGNORECASE)
 
 
 def sanitize_filename(filename: str, default: str = "asset") -> str:
@@ -70,8 +72,22 @@ def get_asset_folder_and_name(url: str, content_type: str = "") -> Tuple[str, st
     return folder, raw_name
 
 
+def format_js_code(code: str) -> str:
+    """Lightweight beautifier for minified single-line JS files."""
+    if len(code) < 300 or code.count('\n') > len(code) / 120:
+        return code
+    try:
+        # Add clean linebreaks after semicolons and braces
+        formatted = re.sub(r';(?!\s*\n)', ';\n', code)
+        formatted = re.sub(r'([{}])', r'\n\1\n', formatted)
+        formatted = re.sub(r'\n{2,}', '\n', formatted)
+        return formatted
+    except Exception:
+        return code
+
+
 class WebScraper:
-    """Smart Async Website Cloner and Asset Downloader."""
+    """Smart Async Website Cloner, Deep Source-Map Unpacker and Asset Downloader."""
 
     def __init__(self, target_url: str, timeout: float = 7.0, max_concurrency: int = 25, max_assets: int = 90):
         if not target_url.startswith(('http://', 'https://')):
@@ -100,15 +116,17 @@ class WebScraper:
 
     async def clone_website(self) -> Tuple[str, Dict[str, bytes], IntelExtractor]:
         """
-        Smart Cloner:
+        Deep Cloner & Source Map Unpacker:
         - Downloads HTML with Chrome headers and fallback support.
         - Deep extracts HTML, CSS, JS, Fonts, Media, Manifests, and SVG icons.
+        - Detects and unpacks .js.map Source Maps into original unminified code!
         - Rewrites URLs for offline viewing.
         """
         files_map: Dict[str, bytes] = {}
         download_queue: List[str] = []
         url_to_local_path: Dict[str, str] = {}
         name_counter: Dict[str, int] = {}
+        sourcemap_candidates: List[Tuple[str, str]] = []  # (orig_js_url, map_url)
 
         transport = httpx.AsyncHTTPTransport(retries=2, verify=False)
         async with httpx.AsyncClient(headers=CHROME_DESKTOP_HEADERS, transport=transport) as client:
@@ -116,7 +134,6 @@ class WebScraper:
             try:
                 html_resp = await client.get(self.target_url, timeout=self.timeout, follow_redirects=True)
                 if html_resp.status_code in [403, 406]:
-                    # Retry with mobile UA
                     html_resp = await client.get(
                         self.target_url,
                         headers={"User-Agent": MOBILE_UA},
@@ -126,7 +143,6 @@ class WebScraper:
                 raw_html = html_resp.text
                 final_url = str(html_resp.url)
             except Exception:
-                # Fallback to http:// if https failed
                 if self.target_url.startswith("https://"):
                     fallback_url = "http://" + self.target_url[8:]
                     html_resp = await client.get(fallback_url, timeout=self.timeout, follow_redirects=True)
@@ -138,6 +154,8 @@ class WebScraper:
             # Update base url in intel
             self.intel.base_url = final_url
             self.intel.domain = urlparse(final_url).netloc
+            parts = self.intel.domain.split(".")
+            self.intel.root_domain = ".".join(parts[-2:]) if len(parts) >= 2 else self.intel.domain
 
             # Scan raw HTML for APIs & Keys
             self.intel.analyze_text(raw_html, source_label="index.html")
@@ -149,7 +167,7 @@ class WebScraper:
             base_tag = soup.find('base')
             effective_base = urljoin(final_url, base_tag.get('href', '')) if base_tag and base_tag.get('href') else final_url
 
-            # 2. Smart Asset Discovery across all HTML5 tags
+            # 2. Smart Asset Discovery across HTML5 tags
             tag_attrs = [
                 ("link", "href"),
                 ("script", "src"),
@@ -230,11 +248,25 @@ class WebScraper:
                 files_map[local_path] = content_bytes
                 url_to_local_path[orig_url] = local_path
 
-                # Deep scan JS files for APIs & Keys
+                # Deep scan JS files for APIs, Secrets, and SourceMaps
                 if "assets/js" in folder or "javascript" in content_type:
                     try:
                         js_text = content_bytes.decode("utf-8", errors="ignore")
                         self.intel.analyze_text(js_text, source_label=local_path)
+
+                        # Format minified JS for developer readability
+                        formatted_js = format_js_code(js_text)
+                        if formatted_js != js_text:
+                            files_map[local_path] = formatted_js.encode("utf-8")
+
+                        # Check for SourceMappingURL
+                        sm_match = SOURCEMAP_REGEX.search(js_text)
+                        if sm_match:
+                            sm_url = urljoin(orig_url, sm_match.group(1).strip())
+                            sourcemap_candidates.append((orig_url, sm_url))
+                        elif orig_url.endswith(".js"):
+                            # Opportunistically check .js.map
+                            sourcemap_candidates.append((orig_url, orig_url + ".map"))
                     except Exception:
                         pass
 
@@ -267,7 +299,29 @@ class WebScraper:
                     files_map[s_local] = s_content
                     url_to_local_path[s_orig_url] = s_local
 
-            # 5. Rewrite URLs in HTML for offline viewing
+            # 5. SOURCE MAP DEEP UNPACKER (.map files)
+            if sourcemap_candidates:
+                # Limit to top 5 sourcemap checks to preserve fast execution
+                sm_tasks = [self._fetch_url(client, candidate[1]) for candidate in sourcemap_candidates[:5]]
+                sm_results = await asyncio.gather(*sm_tasks)
+                for sm_res in sm_results:
+                    if not sm_res:
+                        continue
+                    sm_url, sm_bytes, _ = sm_res
+                    try:
+                        sm_json = json.loads(sm_bytes.decode("utf-8", errors="ignore"))
+                        sources = sm_json.get("sources", [])
+                        contents = sm_json.get("sourcesContent", [])
+                        if sources and contents:
+                            self.intel.sourcemaps_found.append(sm_url)
+                            for src_path, src_content in zip(sources, contents):
+                                if src_content and isinstance(src_content, str):
+                                    clean_p = src_path.replace("webpack:///", "").replace("../", "").lstrip("/")
+                                    files_map[f"original_src/{clean_p}"] = src_content.encode("utf-8")
+                    except Exception:
+                        pass
+
+            # 6. Rewrite URLs in HTML for offline viewing
             for tag, attr in tag_attrs:
                 for elem in soup.find_all(tag):
                     val = elem.get(attr)

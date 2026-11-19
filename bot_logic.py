@@ -219,7 +219,7 @@ def get_action_selection_keyboard(url_hash: str) -> Dict[str, Any]:
                 {"text": "⚡ Download Full Source (ZIP)", "callback_data": f"dl_full:{url_hash}", "style": "success"}
             ],
             [
-                {"text": "🔌 Extract APIs & Secrets (.TXT)", "callback_data": f"dl_api:{url_hash}", "style": "primary"}
+                {"text": "🔌 Extract APIs & Client (.TXT)", "callback_data": f"dl_api:{url_hash}", "style": "primary"}
             ],
             [
                 {"text": "👑 Owner (@owAtom)", "url": f"https://t.me/{OWNER_USERNAME}", "style": "danger"}
@@ -236,14 +236,14 @@ async def process_download_request(
     status_id: Optional[int] = None,
     reply_to_msg_id: Optional[int] = None
 ) -> None:
-    """Clones and delivers with real-time multi-stage visual progress bars."""
+    """Clones, unpacks sourcemaps, generates API client & delivers with progress bars."""
     start_time = time.time()
     try:
         # Stage 1: Connecting (25%)
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"⚡ <b>Connecting to Target...</b>\n"
+                f"⚡ <b>Stage 1/4: Connecting to Target...</b>\n"
                 f"{render_progress_bar(25)}\n\n"
                 f"🌐 <b>Domain:</b> <code>{target_url}</code>\n"
                 f"⏳ <i>Bypassing WAF &amp; fetching HTML structure...</i>"
@@ -256,45 +256,50 @@ async def process_download_request(
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"📥 <b>Assets Captured!</b>\n"
+                f"📥 <b>Stage 2/4: Assets &amp; Code Captured!</b>\n"
                 f"{render_progress_bar(65)}\n\n"
-                f"📁 <b>Files Downloaded:</b> {len(files_map)} assets\n"
-                f"🔍 <i>Extracting embedded APIs &amp; secrets...</i>"
+                f"📁 <b>Assets Downloaded:</b> {len(files_map)} files\n"
+                f"🔍 <i>Extracting APIs, SPA routes &amp; sourcemaps...</i>"
             )
 
         summary = intel.get_summary_report()
         total_apis = summary["statistics"]["total_relative_apis"] + summary["statistics"]["total_external_apis"]
+        total_spa = summary["statistics"]["total_spa_routes"]
         total_keys = summary["statistics"].get("total_secrets_detected", 0)
 
-        # Stage 3: Packaging (90%)
+        # Stage 3: Packaging & Generating API Client (90%)
         if status_id:
             await bot.edit_message(
                 chat_id, status_id,
-                f"📦 <b>Compiling Package...</b>\n"
+                f"📦 <b>Stage 3/4: Building API Client &amp; Prompt...</b>\n"
                 f"{render_progress_bar(90)}\n\n"
                 f"🔌 <b>APIs Found:</b> {total_apis} routes\n"
-                f"🔑 <b>Keys Detected:</b> {total_keys}\n"
-                f"🚀 <i>Uploading to Telegram...</i>"
+                f"🗺️ <b>SPA Routes:</b> {total_spa} screens\n"
+                f"🚀 <i>Packaging &amp; uploading to Telegram...</i>"
             )
 
         elapsed_time = round(time.time() - start_time, 2)
 
-        # 1. ONLY APIs & SECRETS (Sends as instant TXT document)
+        # 1. ONLY APIs, CLIENT & SECRETS (Sends as instant TXT document)
         if category == "api":
             text_report = intel.generate_text_report()
-            txt_bytes = text_report.encode("utf-8")
-            filename = f"apis_{scraper.domain.replace('.', '_')}.txt"
+            # Also attach quick Python API client code at the bottom of the text report
+            api_client_py = intel.generate_api_client_py()
+            full_txt = text_report + "\n\n" + ("=" * 65) + "\n   AUTO-GENERATED PYTHON API CLIENT\n" + ("=" * 65) + "\n\n" + api_client_py
+            txt_bytes = full_txt.encode("utf-8")
+            filename = f"apis_client_{scraper.domain.replace('.', '_')}.txt"
 
             caption = (
                 f"╭────────────────────────╮\n"
-                f"     🔌 <b>APIs &amp; Secrets Extracted</b>\n"
+                f"     🔌 <b>APIs &amp; Client Ready</b>\n"
                 f"╰────────────────────────╯\n\n"
                 f"🌐 <b>Domain</b> ›  <code>{scraper.domain}</code>\n"
                 f"🔌 <b>APIs Found</b> ›  {total_apis} Endpoints\n"
+                f"🗺️ <b>SPA Screens</b> ›  {total_spa} Routes\n"
                 f"🔑 <b>Keys Detected</b> ›  {total_keys}\n"
                 f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
                 f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
-                f"📄 <i>Open file above to view all discovered API routes &amp; tokens!</i>\n\n"
+                f"📄 <i>Open file above directly to view all endpoints &amp; Python SDK script!</i>\n\n"
                 f"👑 <b>Owner:</b> @{OWNER_USERNAME}"
             )
             await bot.send_document(
@@ -307,7 +312,7 @@ async def process_download_request(
                 reply_markup=get_home_keyboard()
             )
 
-        # 2. FULL WEBSITE ZIP PACKAGE
+        # 2. FULL WEBSITE REVERSE-ENGINEERED ZIP PACKAGE
         else:
             zip_buf, zip_name, stats = ZipPackager.build_zip(
                 domain=scraper.domain,
@@ -315,17 +320,21 @@ async def process_download_request(
                 intel=intel,
                 category="all"
             )
+            sourcemap_tag = f"\n🧠 <b>SourceMaps:</b> Unpacked to <code>original_src/</code>" if stats["sourcemaps_unpacked"] > 0 else ""
+
             caption = (
                 f"╭────────────────────────╮\n"
-                f"     ⚡ <b>Full Source Complete</b>\n"
+                f"     ⚡ <b>Full Source &amp; Intel Complete</b>\n"
                 f"╰────────────────────────╯\n\n"
                 f"🌐 <b>Domain</b> ›  <code>{scraper.domain}</code>\n"
                 f"📦 <b>Size</b> ›  {stats['size_str']}\n"
                 f"📁 <b>Files</b> ›  {stats['total_files']}\n"
                 f"🔌 <b>APIs Found</b> ›  {stats['total_apis']} Endpoints\n"
-                f"🔑 <b>Configs/Keys</b> ›  {stats['keys_count']} Detected\n"
+                f"🗺️ <b>SPA Routes</b> ›  {stats['spa_routes_count']} Screens\n"
+                f"🔑 <b>Keys Detected</b> ›  {stats['keys_count']}{sourcemap_tag}\n"
                 f"⏱ <b>Time</b> ›  {elapsed_time}s\n"
                 f"📊 <b>Progress</b> ›  {render_progress_bar(100)}\n\n"
+                f"🤖 <i>Includes <code>api_client.py</code> &amp; <code>AI_CLONE_PROMPT.md</code></i>\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"👑 <b>Owner</b> ›  @{OWNER_USERNAME}\n"
                 f"📢 <b>Channel</b> ›  @{FORCE_CHANNEL_USERNAME}"
@@ -367,7 +376,6 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         cb_data = callback_query.get("data") or ""
         user = callback_query.get("from", {})
         user_id = user.get("id")
-        username = user.get("username", "User")
         msg = callback_query.get("message")
         chat_id = msg.get("chat", {}).get("id") if msg else None
         msg_id = msg.get("message_id") if msg else None
@@ -375,30 +383,29 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         if cb_data == "check_join":
             is_member = await bot.is_user_joined(user_id)
             if is_member:
-                await bot.answer_callback_query(cb_id, "✅ Verified! Ab aap koi bhi link bhej sakte hain.", show_alert=False)
+                await bot.answer_callback_query(cb_id, "✅ Verified! You can now send any website link.", show_alert=False)
                 verified_text = (
-                    f"⚡ <b>WebSource &amp; Intel Hub</b>\n\n"
-                    f"👋 <b>Welcome:</b> @{username} | 🆔 <code>{user_id}</code>\n"
-                    f"👑 <b>Status:</b> Verified User\n\n"
-                    f"👉 <b>Koi bhi website link ya domain chat me bhejein:</b>\n"
-                    f"<code>goagamea.com</code> ya <code>https://example.com</code>"
+                    "🎉 <b>Channel Verification Successful!</b>\n\n"
+                    "Now you can freely use <b>Advance WebSource &amp; Intel Bot</b>.\n\n"
+                    "📌 <b>Simply send any website URL or domain directly:</b>\n"
+                    "<code>goagamea.com</code> or <code>https://example.com</code>"
                 )
                 if chat_id and msg_id:
                     await bot.edit_message(chat_id, msg_id, verified_text, reply_markup=get_home_keyboard())
             else:
                 await bot.answer_callback_query(
                     cb_id,
-                    f"❌ Aapne abhi tak @{FORCE_CHANNEL_USERNAME} join nahi kiya hai! Pehle channel join karein aur phir click karein.",
+                    f"❌ You have not joined @{FORCE_CHANNEL_USERNAME} yet! Please join the channel first.",
                     show_alert=True
                 )
             return
 
         elif cb_data == "help_info":
             help_text = (
-                f"⚡ <b>Quick Guide</b>\n\n"
-                "• Kisi bhi website ka link chat me bhejein (e.g. <code>goagamea.com</code>)\n"
-                "• <b>Full Source (ZIP):</b> Poora code, CSS, JS, Images aur APIs\n"
-                "• <b>APIs &amp; Secrets (.TXT):</b> Saare backend routes bina zip ke direct text me\n\n"
+                "📖 <b>How to Use &amp; Features:</b>\n\n"
+                "• <b>Direct Link:</b> Send any domain or URL directly (e.g. <code>goagamea.com</code>).\n"
+                "• <b>Full Source (ZIP):</b> Complete HTML, CSS, JS, Images, <code>api_client.py</code> &amp; <code>AI_CLONE_PROMPT.md</code>.\n"
+                "• <b>APIs &amp; Client (.TXT):</b> Instant text report of all endpoints, keys &amp; Python SDK script without unzipping.\n\n"
                 f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n"
                 f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}"
             )
@@ -428,7 +435,7 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
                 f"⚡ <b>Processing Target...</b>\n"
                 f"{render_progress_bar(10)}\n\n"
                 f"🌐 <b>Domain:</b> <code>{target_url}</code>\n"
-                f"📁 <i>Extracting {'APIs & Secrets' if category == 'api' else 'Full Source Code'}...</i>",
+                f"📁 <i>Extracting {'APIs & Client' if category == 'api' else 'Full Source Package'}...</i>",
                 reply_to_message_id=msg_id
             )
             status_id = status_msg.get("message_id") if status_msg else None
@@ -453,7 +460,6 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     msg_id = message.get("message_id")
     user = message.get("from", {})
     user_id = user.get("id")
-    username = user.get("username", "User")
 
     if not chat_id or not text or not user_id:
         return
@@ -463,11 +469,10 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     if not is_member:
         lock_text = (
             f"🔒 <b>Access Locked: Channel Join Required</b>\n\n"
-            f"👋 <b>Welcome:</b> @{username} | 🆔 <code>{user_id}</code>\n\n"
-            f"Bot use karne ke liye hamara official channel join karein:\n"
+            f"To use this bot, please join our official channel first:\n\n"
             f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}\n"
             f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n\n"
-            f"Neeche button dabakar channel join karein aur <b>Joined / Verify</b> click karein!"
+            f"Click the button below to join, then tap <b>Joined / Verify</b>!"
         )
         await bot.send_message(
             chat_id,
@@ -477,14 +482,21 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         )
         return
 
-    # 4. Handle /start and /help commands
+    # 4. Handle /start and /help commands (Clean, Loved English Format)
     if text.startswith(("/start", "/help")):
         welcome_text = (
-            f"⚡ <b>WebSource &amp; Intel Control Hub</b>\n\n"
-            f"👋 <b>Welcome:</b> @{username} | 🆔 <code>{user_id}</code>\n"
-            f"👑 <b>Status:</b> Verified User\n\n"
-            f"Koi bhi website link ya domain chat me bhejein:\n"
-            f"<code>goagamea.com</code> ya <code>https://example.com</code>"
+            "🚀 <b>Welcome to Advance WebSource &amp; Intel Bot!</b>\n\n"
+            "I extract and reverse-engineer any website's <b>Full Source Code + A-to-Z Embedded APIs</b> in a single offline-ready ZIP file.\n\n"
+            "✨ <b>Features:</b>\n"
+            "• 🌐 <b>Full Source:</b> HTML, CSS, JS, Images &amp; Fonts\n"
+            "• 🔌 <b>A-to-Z API Extraction:</b> Relative routes, Backend APIs &amp; WebSockets\n"
+            "• 🤖 <b>Auto API Client:</b> Ready-to-use Python SDK script (<code>api_client.py</code>)\n"
+            "• 🎯 <b>AI Clone Prompt:</b> Instant blueprint to recreate the app in Cursor/ChatGPT\n"
+            "• 🧠 <b>Source Map Unpacker:</b> Reconstructs original unminified developer code\n"
+            "• 📦 <b>Offline-Ready ZIP:</b> Assets locally mapped for offline browsing\n\n"
+            "📌 <b>How to Use:</b>\n"
+            "Simply send any website URL or domain directly!\n"
+            "<i>Example: <code>goagamea.com</code> or <code>https://example.com</code></i>"
         )
         await bot.send_message(
             chat_id,
@@ -500,8 +512,8 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     if not target_url:
         await bot.send_message(
             chat_id,
-            "💡 <b>Website link ya domain chat me bhejein:</b>\n\n"
-            "Example:\n<code>goagamea.com</code>\nya\n<code>https://example.com</code>",
+            "💡 <b>Please send a valid website link or domain!</b>\n\n"
+            "Example:\n<code>goagamea.com</code>\nor\n<code>https://example.com</code>",
             reply_to_message_id=msg_id,
             reply_markup=get_home_keyboard()
         )
@@ -513,7 +525,7 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
     menu_text = (
         f"⚡ <b>Website Detected</b>\n\n"
         f"🌐 <b>Target:</b> <code>{target_url}</code>\n\n"
-        f"Niche diye gaye option par click karein:"
+        f"Choose an option below:"
     )
     await bot.send_message(
         chat_id,
