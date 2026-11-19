@@ -402,12 +402,20 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
 
         elif cb_data == "help_info":
             help_text = (
-                "📖 <b>How to Use &amp; Features:</b>\n\n"
-                "• <b>Direct Link:</b> Send any domain or URL directly (e.g. <code>goagamea.com</code>).\n"
-                "• <b>Full Source (ZIP):</b> Complete HTML, CSS, JS, Images, <code>api_client.py</code> &amp; <code>AI_CLONE_PROMPT.md</code>.\n"
-                "• <b>APIs &amp; Client (.TXT):</b> Instant text report of all endpoints, keys &amp; Python SDK script without unzipping.\n\n"
-                f"👑 <b>Owner:</b> @{OWNER_USERNAME}\n"
-                f"📢 <b>Channel:</b> @{FORCE_CHANNEL_USERNAME}"
+                "📖 <b>Commands &amp; Usage Guide:</b>\n\n"
+                "⚡ <b>Quick Commands:</b>\n"
+                "• <code>/start</code> — Launch the bot &amp; control hub\n"
+                "• <code>/help</code> — View available commands &amp; features\n"
+                f"• <code>/owner</code> — Contact official bot owner (@{OWNER_USERNAME})\n"
+                f"• <code>/channel</code> — Official updates channel (@{FORCE_CHANNEL_USERNAME})\n\n"
+                "📌 <b>How to Use:</b>\n"
+                "Simply send any website URL or domain directly in chat:\n"
+                "<i>Example: <code>goagamea.com</code> or <code>https://example.com</code></i>\n\n"
+                "✨ <b>What You Receive:</b>\n"
+                "• <b>Full Source (ZIP):</b> Offline-ready HTML, CSS, JS, Images &amp; Fonts\n"
+                "• <b>Auto API Client:</b> Ready-to-use Python SDK (<code>api_client.py</code>)\n"
+                "• <b>AI Prompt:</b> Recreate blueprint in Cursor/Claude (<code>AI_CLONE_PROMPT.md</code>)\n"
+                "• <b>APIs &amp; Client (.TXT):</b> Instant endpoints, SPA screens &amp; tokens"
             )
             await bot.answer_callback_query(cb_id)
             if chat_id and msg_id:
@@ -482,8 +490,8 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         )
         return
 
-    # 4. Handle /start and /help commands (Clean, Loved English Format)
-    if text.startswith(("/start", "/help")):
+    # 4. Handle /start command (Clean, Loved English Format)
+    if text.startswith("/start"):
         welcome_text = (
             "🚀 <b>Welcome to Advance WebSource &amp; Intel Bot!</b>\n\n"
             "I extract and reverse-engineer any website's <b>Full Source Code + A-to-Z Embedded APIs</b> in a single offline-ready ZIP file.\n\n"
@@ -501,6 +509,32 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         await bot.send_message(
             chat_id,
             welcome_text,
+            reply_to_message_id=msg_id,
+            reply_markup=get_home_keyboard()
+        )
+        return
+
+    # Handle /help command (Dedicated Commands List & Guide)
+    if text.startswith("/help"):
+        help_text = (
+            "📖 <b>Commands &amp; Usage Guide:</b>\n\n"
+            "⚡ <b>Quick Commands:</b>\n"
+            "• <code>/start</code> — Launch the bot &amp; control hub\n"
+            "• <code>/help</code> — View available commands &amp; features\n"
+            f"• <code>/owner</code> — Contact official bot owner (@{OWNER_USERNAME})\n"
+            f"• <code>/channel</code> — Official updates channel (@{FORCE_CHANNEL_USERNAME})\n\n"
+            "📌 <b>How to Use:</b>\n"
+            "Simply send any website URL or domain directly in chat:\n"
+            "<i>Example: <code>goagamea.com</code> or <code>https://example.com</code></i>\n\n"
+            "✨ <b>What You Receive:</b>\n"
+            "• <b>Full Source (ZIP):</b> Offline-ready HTML, CSS, JS, Images &amp; Fonts\n"
+            "• <b>Auto API Client:</b> Ready-to-use Python SDK (<code>api_client.py</code>)\n"
+            "• <b>AI Prompt:</b> Recreate blueprint in Cursor/Claude (<code>AI_CLONE_PROMPT.md</code>)\n"
+            "• <b>APIs &amp; Client (.TXT):</b> Instant endpoints, SPA screens &amp; tokens"
+        )
+        await bot.send_message(
+            chat_id,
+            help_text,
             reply_to_message_id=msg_id,
             reply_markup=get_home_keyboard()
         )
