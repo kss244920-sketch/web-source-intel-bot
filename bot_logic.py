@@ -506,6 +506,42 @@ async def handle_update(bot_token: str, update: Dict[str, Any]) -> None:
         )
         return
 
+    # Handle /owner command
+    if text.startswith("/owner"):
+        owner_text = (
+            f"👑 <b>Bot Developer &amp; Owner:</b> @{OWNER_USERNAME}\n\n"
+            f"For feedback, queries, or custom reverse-engineering tools, contact the owner directly."
+        )
+        await bot.send_message(
+            chat_id,
+            owner_text,
+            reply_to_message_id=msg_id,
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "👑 Contact Owner (@owAtom)", "url": f"https://t.me/{OWNER_USERNAME}", "style": "danger"}]
+                ]
+            }
+        )
+        return
+
+    # Handle /channel command
+    if text.startswith("/channel"):
+        channel_text = (
+            f"📢 <b>Official Updates Channel:</b> @{FORCE_CHANNEL_USERNAME}\n\n"
+            f"Join our channel for latest updates, new tools, and releases!"
+        )
+        await bot.send_message(
+            chat_id,
+            channel_text,
+            reply_to_message_id=msg_id,
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "📢 Join Channel (@OwAbyss)", "url": f"https://t.me/{FORCE_CHANNEL_USERNAME}", "style": "primary"}]
+                ]
+            }
+        )
+        return
+
     # 5. Smart Auto-Detect Target URL from message
     target_url = extract_target_url(text)
 
